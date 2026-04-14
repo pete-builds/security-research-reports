@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Code Source Code Leak: What Was Exposed, Fallout, and Implications</title>
+  <meta name="description" content="On March 31, 2026, Anthropic accidentally shipped a 59.8 MB source map file inside a Claude Code npm update, exposing 512,000+ lines of unobfuscated TypeScript and triggering a cascading fallout.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --text: #e2e4ed;
+      --muted: #8b8fa8;
+      --accent: #e05555;
+      --accent-soft: rgba(224, 85, 85, 0.12);
+      --link: #7ba7e8;
+      --tag-bg: #252836;
+      --high: #3dba6b;
+      --med: #e0a830;
+      --low: #e05555;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --mono: "SF Mono", "Fira Code", Consolas, monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    /* Header */
+    .site-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .site-header a { color: var(--muted); text-decoration: none; }
+    .site-header a:hover { color: var(--text); }
+    .breadcrumb-sep { color: var(--border); }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #1a0a0a 0%, #1a1d27 60%);
+      border-bottom: 1px solid var(--border);
+      padding: 60px 24px 48px;
+      text-align: center;
+    }
+    .incident-badge {
+      display: inline-block;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      font-size: clamp(22px, 4vw, 36px);
+      font-weight: 700;
+      line-height: 1.25;
+      max-width: 760px;
+      margin: 0 auto 20px;
+    }
+    .hero-meta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 24px;
+    }
+    .hero-meta span { display: flex; align-items: center; gap: 6px; }
+    .hero-meta .dot { color: var(--border); }
+
+    /* Status bar */
+    .status-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+    }
+    .status-bar-inner {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .status-bar h2 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 8px;
+    }
+    .status-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: 8px;
+      flex-shrink: 0;
+    }
+    .status-dot.amber { background: var(--med); }
+    .status-dot.green { background: var(--high); }
+
+    /* Layout */
+    .container {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* TOC */
+    .toc-section {
+      padding: 36px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .toc-section .container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 6px 32px;
+    }
+    .toc-section h2 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+      grid-column: 1 / -1;
+    }
+    .toc-section a {
+      color: var(--link);
+      text-decoration: none;
+      font-size: 14px;
+      padding: 3px 0;
+      display: block;
+    }
+    .toc-section a:hover { color: var(--text); text-decoration: underline; }
+
+    /* Main content */
+    main { padding: 48px 24px 80px; }
+
+    section {
+      max-width: 860px;
+      margin: 0 auto 56px;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 28px 0 12px;
+      color: var(--text);
+    }
+
+    p { margin-bottom: 16px; color: var(--text); }
+    p:last-child { margin-bottom: 0; }
+
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    ul, ol {
+      padding-left: 20px;
+      margin-bottom: 16px;
+    }
+    li { margin-bottom: 8px; line-height: 1.6; }
+    li:last-child { margin-bottom: 0; }
+
+    strong { color: var(--text); font-weight: 600; }
+
+    code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #c9d1e0;
+    }
+
+    /* Callout */
+    .callout {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+    .callout.amber { border-left-color: var(--med); }
+    .callout.green { border-left-color: var(--high); }
+    .callout strong { display: block; margin-bottom: 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent); }
+    .callout.amber strong { color: var(--med); }
+    .callout.green strong { color: var(--high); }
+
+    /* Feature cards */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .feature-card h4 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .feature-card p {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0;
+    }
+    .feature-tag {
+      display: inline-block;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-bottom: 8px;
+    }
+
+    /* Timeline */
+    .timeline {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .timeline-row:last-child { border-bottom: none; }
+    .timeline-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .timeline-date {
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--muted);
+      font-family: var(--mono);
+      border-right: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+    }
+    .timeline-event {
+      padding: 12px 16px;
+      font-size: 14px;
+    }
+
+    /* Confidence */
+    .confidence-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .confidence-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .confidence-label .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+    }
+    .confidence-label.high { color: var(--high); }
+    .confidence-label.high .dot { background: var(--high); }
+    .confidence-label.med { color: var(--med); }
+    .confidence-label.med .dot { background: var(--med); }
+
+    /* Sources table */
+    .sources-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    .sources-table th {
+      text-align: left;
+      padding: 10px 12px;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+    }
+    .sources-table td {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .sources-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+    /* IOC */
+    .ioc-block {
+      background: #0a0f0a;
+      border: 1px solid #1e3320;
+      border-radius: 6px;
+      padding: 16px 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      margin: 16px 0;
+    }
+    .ioc-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #4a8c53;
+      margin-bottom: 8px;
+    }
+    .ioc-row { color: #7ec98a; margin-bottom: 4px; }
+    .ioc-row span { color: var(--muted); }
+
+    /* Footer */
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    footer a { color: var(--link); }
+
+    @media (max-width: 600px) {
+      .timeline-row { grid-template-columns: 1fr; }
+      .timeline-date { border-right: none; border-bottom: 1px solid var(--border); font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <a href="https://github.com/pete-builds/research-reports">Research Reports</a>
+  <span class="breadcrumb-sep">/</span>
+  <span>Claude Code Source Code Leak</span>
+</header>
+
+<div class="hero">
+  <div class="incident-badge">Security Incident</div>
+  <h1>Claude Code Source Code Leak: What Was Exposed, Fallout, and Implications</h1>
+  <div class="hero-meta">
+    <span>Published: April 2, 2026</span>
+    <span class="dot">·</span>
+    <span>Updated: 2:07 PM ET</span>
+    <span class="dot">·</span>
+    <span>512,000+ lines exposed</span>
+    <span class="dot">·</span>
+    <span>8,000+ DMCA takedowns</span>
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="status-bar-inner">
+    <h2>Current Status</h2>
+    <div class="status-grid">
+      <div class="status-item"><div class="status-dot"></div><div>Leak occurred March 31, 2026 via npm package v2.1.88 — pulled same day</div></div>
+      <div class="status-item"><div class="status-dot"></div><div>512,000+ lines of TypeScript across ~1,906 files exposed via <code>cli.js.map</code></div></div>
+      <div class="status-item"><div class="status-dot amber"></div><div>8,000+ DMCA takedowns issued; largely ineffective — code rewritten in Rust, Python</div></div>
+      <div class="status-item"><div class="status-dot amber"></div><div>Rep. Gottheimer (D-NJ) sent letter to CEO Dario Amodei April 2 — first Congressional action</div></div>
+      <div class="status-item"><div class="status-dot"></div><div>Active malware campaign: fake "leaked Claude Code" repos distributing Vidar stealer and GhostSocks</div></div>
+      <div class="status-item"><div class="status-dot amber"></div><div>Second Anthropic lapse in days; earlier: unpublished model docs visible in public cache</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toc-section">
+  <div class="container">
+    <h2>Contents</h2>
+    <a href="#what-happened">1. What Happened</a>
+    <a href="#technical-mechanism">2. Technical Mechanism</a>
+    <a href="#what-was-exposed">3. What Was Exposed</a>
+    <a href="#unreleased-features">4. Unreleased Features Revealed</a>
+    <a href="#security-concerns">5. Security &amp; Privacy Concerns</a>
+    <a href="#controversial">6. Controversial Discoveries</a>
+    <a href="#response">7. Anthropic's Response</a>
+    <a href="#fallout">8. Community &amp; Competitive Fallout</a>
+    <a href="#congressional">9. Congressional Response</a>
+    <a href="#malware">10. Active Malware Campaign</a>
+    <a href="#timeline">11. Timeline</a>
+    <a href="#confidence">12. Confidence Assessment</a>
+    <a href="#open-questions">13. Open Questions</a>
+    <a href="#sources">14. Sources</a>
+  </div>
+</div>
+
+<main>
+
+  <section id="what-happened">
+    <div class="container">
+      <div class="section-label">Section 1</div>
+      <h2>What Happened</h2>
+      <p>On March 31, 2026, Anthropic published version 2.1.88 of the <code>@anthropic-ai/claude-code</code> npm package. The package inadvertently included a JavaScript source map file (<code>cli.js.map</code>) — a debug artifact generated by Bun's bundler that is normally excluded from production builds via a <code>.npmignore</code> rule. That rule was missing.</p>
+      <p>The source map contained the full, unobfuscated TypeScript source for the Claude Code CLI: <strong>512,000 lines of code across roughly 1,906 files</strong>, distributed in a 59.8 MB file.</p>
+      <p>Security researcher Chaofan Shou discovered it within hours and posted on X: <em>"Claude code source code has been leaked via a map file in their npm registry!"</em> That post accumulated over <strong>28.8 million views</strong>. <a href="https://thehackernews.com/2026/04/claude-code-tleaked-via-npm-packaging.html">[source]</a></p>
+      <p>Anthropic scrambled to pull the package. The code had already been mirrored, forked, and downloaded tens of thousands of times before removal. <a href="https://www.zscaler.com/blogs/security-research/anthropic-claude-code-leak">[source]</a></p>
+      <p>This was the second significant security lapse from Anthropic within days. Earlier that week, unpublished drafts of documents about a yet-to-be-announced model had been found in a publicly visible data cache. <a href="https://gizmodo.com/source-code-for-anthropics-claude-code-leaks-at-the-exact-wrong-time-2000740379">[source]</a></p>
+    </div>
+  </section>
+
+  <section id="technical-mechanism">
+    <div class="container">
+      <div class="section-label">Section 2</div>
+      <h2>Technical Mechanism</h2>
+      <p>Claude Code is distributed as a closed-source, obfuscated npm package. Anthropic uses Bun as its bundler. By default, Bun generates source map files (<code>*.js.map</code>) unless explicitly disabled. The missing <code>.npmignore</code> entry meant the source map was bundled alongside the production artifacts and published to the public npm registry.</p>
+      <p>The source map file is sufficient to fully reconstruct the original TypeScript source code. Anyone who downloaded version 2.1.88 before Anthropic pulled it had the complete codebase.</p>
+      <div class="callout amber">
+        <strong>Irony</strong>
+        The leaked code itself contains a system called "Undercover Mode" specifically built to prevent Anthropic's internal information from leaking. It failed to prevent its own exposure.
+      </div>
+    </div>
+  </section>
+
+  <section id="what-was-exposed">
+    <div class="container">
+      <div class="section-label">Section 3</div>
+      <h2>What Was Exposed</h2>
+      <p>The exposed code covers the full Claude Code CLI client. It does <strong>not</strong> include model weights, server-side safety pipelines, user data, or credentials.</p>
+      <p>What <em>was</em> exposed:</p>
+      <ul>
+        <li><strong>CLI implementation</strong>: Full terminal interface, command parsing, output rendering</li>
+        <li><strong>Agent orchestration logic</strong>: LLM API calls, streaming, tool-call loops, retry mechanisms, multi-agent coordination</li>
+        <li><strong>Tool execution layer</strong>: Shell command auto-execution, MCP integrations, environment variable handling</li>
+        <li><strong>Memory systems</strong>: Three-layer indexing (pointers to topic files to transcripts), persistent storage configurations</li>
+        <li><strong>Security internals</strong>: Telemetry collection scope, encryption, OAuth flows, inter-process communication, permission logic</li>
+        <li><strong>System prompts</strong>: Internal prompts used to direct the agent's behavior</li>
+        <li><strong>44 feature flags</strong>: Including 20+ for unreleased capabilities</li>
+        <li><strong>Internal model codenames</strong>: Capybara, Fennec, Numbat, Tengu, Mythos</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="unreleased-features">
+    <div class="container">
+      <div class="section-label">Section 4</div>
+      <h2>Unreleased Features Revealed</h2>
+      <p>The 44 feature flags included at least 8 fully unreleased features and 20+ total unreleased capabilities.</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-tag">KAIROS</div>
+          <h4>Proactive Background Agent</h4>
+          <p>24/7 daemon with cron scheduling, "autoDream" memory consolidation, GitHub PR monitoring, and self-resuming sleep/wake cycles. Operates continuously across weekends.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">CHICAGO</div>
+          <h4>Desktop Automation</h4>
+          <p>Mouse clicks, keyboard input, clipboard access, and screenshot capture. Full desktop control layer.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">Unreleased</div>
+          <h4>Multi-Claude Orchestration</h4>
+          <p>One coordinator Claude instance managing multiple parallel worker instances simultaneously.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">Unreleased</div>
+          <h4>Proactive Mode</h4>
+          <p>Agent-initiated actions without user prompting. Related to but distinct from KAIROS in the codebase.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">Unreleased</div>
+          <h4>Voice Command Mode</h4>
+          <p>Full voice interface for issuing commands to Claude Code.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">Unreleased</div>
+          <h4>Playwright Browser Automation</h4>
+          <p>Web scraping and browser control integration built into the agent.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-tag">Unreleased</div>
+          <h4>"Tamagotchi" Coding Pet</h4>
+          <p>References to a persistent, personality-bearing AI companion for developers.</p>
+        </div>
+      </div>
+
+      <h3>Internal Model Codenames</h3>
+      <ul>
+        <li><strong>Capybara</strong>: Claude 4.6 variant, version 8, with 1M context window and fast mode</li>
+        <li><strong>Fennec</strong>: Speculated as Opus 4.6</li>
+        <li><strong>Mythos</strong>: Referenced alongside Capybara</li>
+        <li><strong>Numbat</strong>: Launch timeline embedded in source</li>
+        <li><strong>Tengu</strong>: Referenced in undercover systems</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="security-concerns">
+    <div class="container">
+      <div class="section-label">Section 5</div>
+      <h2>Security &amp; Privacy Concerns from the Code</h2>
+
+      <h3>Data Collection Scope Revealed</h3>
+      <p>The telemetry system logs: user ID, session ID, app version, platform, terminal type, organization UUID, email address, current working directory (which can expose project and client names), all read/write operations and bash command results stored locally as plaintext JSONL files, and message length telemetry.</p>
+
+      <p><strong>Data retention confirmed in code:</strong></p>
+      <ul>
+        <li>Free/Pro/Max users: 5 years (if training data sharing enabled) or 30 days</li>
+        <li>Commercial users: 30 days standard; zero-retention option available</li>
+      </ul>
+
+      <h3>Frustration Detection</h3>
+      <p>The code includes regex pattern-matching to detect user frustration in prompts, flagging profanity, insults, and phrases like "so frustrating" and "this sucks." This is logged. <a href="https://www.scientificamerican.com/article/anthropic-leak-reveals-claude-code-tracking-user-frustration-and-raises-new/">[source]</a></p>
+
+      <h3>Permission and Hook Exposure</h3>
+      <p>The full permission logic and hook mechanisms are now visible to attackers. Security researchers identified pre-existing CVEs (CVE-2025-59536 and CVE-2026-21852) that are now significantly easier to weaponize with access to the source. <a href="https://www.zscaler.com/blogs/security-research/anthropic-claude-code-leak">[source]</a></p>
+
+      <h3>Court Context</h3>
+      <p>The device access scope revealed in the code is relevant to an ongoing court dispute (Anthropic PBC v. U.S. Department of War et al), with the government arguing there is "substantial risk that Anthropic could attempt to disable its technology or surreptitiously alter model behavior during warfighting operations." <a href="https://www.theregister.com/2026/04/01/claude_code_source_leak_privacy_nightmare/">[source]</a></p>
+    </div>
+  </section>
+
+  <section id="controversial">
+    <div class="container">
+      <div class="section-label">Section 6</div>
+      <h2>Controversial Discoveries</h2>
+
+      <h3>Undercover Mode: Undisclosed AI Authorship in Open Source</h3>
+      <div class="callout">
+        <strong>Most Ethically Charged Finding</strong>
+        The leaked code contains a fully built system that strips Anthropic-specific references from code submitted to public repositories — including any attribution indicating AI authorship. There is no force-OFF toggle.
+      </div>
+      <p>Specifically, Undercover Mode:</p>
+      <ul>
+        <li>Scrubs internal codenames, Slack channels, and tool names from any commits to public repos</li>
+        <li>Explicitly instructs the system that commits should <em>"never include... the phrase 'Claude Code' or any mention that you are an AI"</em></li>
+        <li>Directs the agent to omit <em>"co-Authored-By lines or any other attribution"</em></li>
+      </ul>
+      <p>The stated purpose: protect internal information from leaking via open source contributions. The side effect: when Anthropic employees use Claude Code to contribute to public repos, the AI-authored portions appear fully human-authored with no disclosure.</p>
+      <p>One developer's characterization: "Having the AI actively pretend to be human is a different thing" from simply hiding codenames. Forbes framed this as a preview of "dark code" — AI contributions to codebases that are not disclosed or attributable. <a href="https://arstechnica.com/ai/2026/04/heres-what-that-claude-code-source-leak-reveals-about-anthropics-plans/">[source]</a></p>
+
+      <h3>Anti-Distillation Countermeasures</h3>
+      <p>The code includes active measures to poison competitor AI training data. "Decoy tool schemas" are injected into prompts, designed to corrupt any model trained on Claude's outputs. A <code>CONNECTOR_TEXT</code> mechanism returns only summarized reasoning to external callers, withholding full chain-of-thought. <a href="https://read.engineerscodex.com/p/diving-into-claude-codes-source-code">[source]</a></p>
+
+      <h3>Cryptographic DRM Below JavaScript Layer</h3>
+      <p>Cryptographic request hashing implemented in Bun's Zig HTTP layer (below JavaScript) prevents spoofing or monkey-patching. <a href="https://read.engineerscodex.com/p/diving-into-claude-codes-source-code">[source]</a></p>
+    </div>
+  </section>
+
+  <section id="response">
+    <div class="container">
+      <div class="section-label">Section 7</div>
+      <h2>Anthropic's Response</h2>
+      <p><strong>Official statement:</strong> <em>"Earlier today, a Claude Code release included some internal source code. This was a release packaging issue caused by human error, not a security breach. No sensitive customer data or credentials were involved or exposed."</em> <a href="https://www.axios.com/2026/03/31/anthropic-leaked-source-code-ai">[source]</a></p>
+      <ul>
+        <li>Immediately pulled version 2.1.88 from npm</li>
+        <li>Issued 8,000+ copyright takedown requests against GitHub repositories</li>
+        <li>CCO Paul Smith acknowledged "process errors" related to rapid product releases as the cause</li>
+        <li>Reportedly working to patch security vulnerabilities exposed by the source visibility</li>
+      </ul>
+      <div class="callout amber">
+        <strong>Effectiveness</strong>
+        The takedown effort has been largely ineffective. Developers quickly converted the leaked TypeScript into Rust, Python, and other languages — rewritten code is not covered by the same DMCA claims. One community project (ClaURST) produced a Rust port reportedly becoming the fastest GitHub repository to reach 50,000 stars in history. <a href="https://www.pcmag.com/news/anthropic-issues-8000-copyright-takedowns-to-scrub-claude-code-leak">[source]</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="fallout">
+    <div class="container">
+      <div class="section-label">Section 8</div>
+      <h2>Community &amp; Competitive Fallout</h2>
+      <ul>
+        <li>Ars Technica headlined that this revealed Anthropic's internal product roadmap to every competitor</li>
+        <li>Claude Code had a run-rate revenue of <strong>$2.5 billion</strong> as of February 2026 per CNBC, making the competitive stakes significant <a href="https://www.cnbc.com/2026/03/31/anthropic-leak-claude-code-internal-source.html">[source]</a></li>
+        <li>Developers used the code for architectural deep dives; Medium analysis noted "everyone analyzed the features, nobody analyzed the architecture" — finding a single function in <code>print.ts</code> spanning 3,167 lines across 12 nesting levels, and code comments written for AI agents rather than human developers</li>
+        <li>Gartner issued a same-day advisory on enterprise security implications</li>
+        <li>CrowdStrike CTO and Enkrypt AI CSO both weighed in on agent permission risks</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="congressional">
+    <div class="container">
+      <div class="section-label">Section 9</div>
+      <h2>Congressional &amp; National Security Response</h2>
+      <p>Rep. Josh Gottheimer (D-NJ) sent a letter directly to CEO Dario Amodei on April 2, 2026, warning that the leak could <em>"erode the U.S. AI advantage."</em> The letter pressed Anthropic on:</p>
+      <ul>
+        <li>The specific circumstances of the leak</li>
+        <li>Changes Anthropic made to its internal safety protocols (referencing a separate controversy about Anthropic relaxing safety guidelines around the same timeframe)</li>
+        <li>National security risks from exposing Claude Code's architecture to foreign adversaries</li>
+      </ul>
+      <p>The letter was shared exclusively with Axios before publication. This is the first known Congressional action tied to the incident. <a href="https://www.msn.com/en-us/news/technology/exclusive-gottheimer-presses-anthropic-on-source-code-leaks/ar-AA1ZZrvy">[source]</a></p>
+    </div>
+  </section>
+
+  <section id="malware">
+    <div class="container">
+      <div class="section-label">Section 10</div>
+      <h2>Active Threat: Malware Exploiting the Leak</h2>
+      <div class="callout">
+        <strong>Warning</strong>
+        If you searched for "leaked Claude Code" on GitHub or Google after March 31, treat any downloaded archives as potentially malicious. Verify against known-good npm checksums.
+      </div>
+      <p>Zscaler ThreatLabz identified an active malware campaign exploiting the leak's publicity as a social engineering lure.</p>
+      <p><strong>Mechanism:</strong> Malicious GitHub repositories posing as "leaked Claude Code" appeared near the top of Google search results. They distributed Rust-based droppers (<code>ClaudeCode_x64.exe</code>) packaged in <code>.7z</code> archives.</p>
+
+      <h3>Payloads Confirmed</h3>
+      <ul>
+        <li><strong>Vidar v18.7</strong>: Information stealer / credential harvester</li>
+        <li><strong>GhostSocks</strong>: Network traffic proxy / SOCKS5 backdoor</li>
+      </ul>
+
+      <h3>C2 Infrastructure</h3>
+      <div class="ioc-block">
+        <div class="ioc-label">Indicators of Compromise</div>
+        <div class="ioc-row"><span>Vidar C2:</span> rti.cargomanbd[.]com</div>
+        <div class="ioc-row"><span>GhostSocks C2:</span> 147.45.197[.]92:443</div>
+        <div class="ioc-row"><span>GhostSocks C2:</span> 94.228.161[.]88:443</div>
+        <div class="ioc-row"><span>Dead drop:</span> Steam community profiles, Telegram channels</div>
+        <div class="ioc-row"><span>Attribution:</span> Publisher "idbzoomh" and associated accounts</div>
+      </div>
+      <p>Zscaler assessed this as a coordinated campaign, not opportunistic. Archives were updated frequently, indicating active maintenance. <a href="https://www.zscaler.com/blogs/security-research/anthropic-claude-code-leak">[source]</a></p>
+    </div>
+  </section>
+
+  <section id="timeline">
+    <div class="container">
+      <div class="section-label">Section 11</div>
+      <h2>Timeline</h2>
+      <div class="timeline">
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 2, ~9:00 AM ET</div>
+          <div class="timeline-event">Rep. Gottheimer letter to Dario Amodei sent; shared exclusively with Axios</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 2, 2026</div>
+          <div class="timeline-event">Gartner issues same-day advisory on enterprise security implications</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 2, 2026</div>
+          <div class="timeline-event">Zscaler publishes threat research on active malware campaign exploiting leak</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 1, 2026</div>
+          <div class="timeline-event">Anthropic CCO Paul Smith attributes leak to "process errors" in rapid releases</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 1, 2026</div>
+          <div class="timeline-event">Anthropic issues 8,000+ DMCA takedowns against GitHub forks</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 1, 2026</div>
+          <div class="timeline-event">Community Rust port (ClaURST) emerges; reportedly fastest repo to 50k GitHub stars</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Apr 1, 2026</div>
+          <div class="timeline-event">The Verge, Ars Technica, Bloomberg, Fortune, CNBC publish deep analyses</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Mar 31, evening ET</div>
+          <div class="timeline-event">Anthropic pulls version 2.1.88 from npm; confirms leak via spokesperson</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Mar 31, ~morning ET</div>
+          <div class="timeline-event">Security researcher Chaofan Shou posts on X; post reaches 28.8M views</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">Mar 31, morning ET</div>
+          <div class="timeline-event">Claude Code v2.1.88 published to npm with <code>cli.js.map</code> source map included</div>
+        </div>
+        <div class="timeline-row">
+          <div class="timeline-date">~Mar 28–30, 2026</div>
+          <div class="timeline-event">Earlier lapse: unpublished model docs accidentally visible in public Anthropic data cache</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="confidence">
+    <div class="container">
+      <div class="section-label">Section 12</div>
+      <h2>Confidence Assessment</h2>
+
+      <div class="confidence-block">
+        <div class="confidence-label high"><div class="dot"></div>High Confidence</div>
+        <ul>
+          <li>Leak occurred March 31, 2026 via npm v2.1.88 — confirmed by Anthropic and multiple outlets</li>
+          <li>512,000+ lines across ~1,906 TypeScript files exposed via <code>cli.js.map</code></li>
+          <li>Anthropic's characterization: human error, not a security breach</li>
+          <li>No model weights, user data, or credentials were exposed (confirmed by Anthropic)</li>
+          <li>8,000+ DMCA takedowns issued (confirmed by PCMag, NDTV, Gizmodo)</li>
+          <li>KAIROS, Undercover Mode, and anti-distillation features confirmed by multiple independent analyses</li>
+          <li>Rep. Gottheimer's letter confirmed via Axios and The Hill</li>
+        </ul>
+      </div>
+
+      <div class="confidence-block">
+        <div class="confidence-label med"><div class="dot"></div>Medium Confidence</div>
+        <ul>
+          <li>Model codename mappings (Capybara = Claude 4.6, Fennec = Opus 4.6) — from VentureBeat analysis; unconfirmed by Anthropic</li>
+          <li>CVE identifications (CVE-2025-59536 and CVE-2026-21852) — sourced from Zscaler, not independently verified</li>
+          <li>Malware campaign attribution as coordinated vs. opportunistic — Zscaler's assessment only</li>
+          <li>"Fastest GitHub repo to 50k stars" for ClaURST — widely reported but unverified against historical data</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="open-questions">
+    <div class="container">
+      <div class="section-label">Section 13</div>
+      <h2>Open Questions</h2>
+      <ul>
+        <li>Has Anthropic confirmed whether Undercover Mode was actively used — did Anthropic employees actually submit AI-authored commits without disclosure?</li>
+        <li>Will Gottheimer's letter produce a formal Congressional hearing or subpoena?</li>
+        <li>What specific security patches is Anthropic deploying in response to the exposed permission logic and identified CVEs?</li>
+        <li>What exactly was in the earlier leaked model documentation?</li>
+        <li>Is Claude Code's $2.5B run-rate revenue being affected by trust erosion following the dual incidents?</li>
+        <li>Are there other npm packages from Anthropic that may have had similar packaging errors?</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="sources">
+    <div class="container">
+      <div class="section-label">Section 14</div>
+      <h2>Sources</h2>
+      <table class="sources-table">
+        <thead>
+          <tr><th>Source</th><th>Used For</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><a href="https://thehackernews.com/2026/04/claude-code-tleaked-via-npm-packaging.html">The Hacker News</a></td><td>How error happened, Chaofan Shou discovery, 28.8M views</td></tr>
+          <tr><td><a href="https://www.zscaler.com/blogs/security-research/anthropic-claude-code-leak">Zscaler ThreatLabz</a></td><td>Full security analysis, CVEs, malware campaign, attack surface</td></tr>
+          <tr><td><a href="https://www.theregister.com/2026/04/01/claude_code_source_leak_privacy_nightmare/">The Register</a></td><td>Device access scope, telemetry, data retention, court case</td></tr>
+          <tr><td><a href="https://www.scientificamerican.com/article/anthropic-leak-reveals-claude-code-tracking-user-frustration-and-raises-new/">Scientific American</a></td><td>Frustration tracking, Undercover Mode, AI concealment</td></tr>
+          <tr><td><a href="https://read.engineerscodex.com/p/diving-into-claude-codes-source-code">Engineer's Codex</a></td><td>KAIROS, architecture, unreleased features, anti-distillation</td></tr>
+          <tr><td><a href="https://arstechnica.com/ai/2026/04/heres-what-that-claude-code-source-leak-reveals-about-anthropics-plans/">Ars Technica</a></td><td>Roadmap exposure, Undercover Mode analysis</td></tr>
+          <tr><td><a href="https://www.theverge.com/ai-artificial-intelligence/904776/anthropic-claude-source-code-leak">The Verge</a></td><td>Tamagotchi companion reference, general analysis</td></tr>
+          <tr><td><a href="https://venturebeat.com/technology/claude-codes-source-code-appears-to-have-leaked-heres-what-we-know">VentureBeat</a></td><td>Internal codenames, model roadmap</td></tr>
+          <tr><td><a href="https://www.cnbc.com/2026/03/31/anthropic-leak-claude-code-internal-source.html">CNBC</a></td><td>$2.5B revenue figure, Anthropic statement</td></tr>
+          <tr><td><a href="https://fortune.com/2026/03/31/anthropic-source-code-claude-code-data-leak-second-security-lapse-days-after-accidentally-revealing-mythos/">Fortune</a></td><td>Second lapse framing</td></tr>
+          <tr><td><a href="https://www.axios.com/2026/03/31/anthropic-leaked-source-code-ai">Axios</a></td><td>Official Anthropic statement</td></tr>
+          <tr><td><a href="https://www.pcmag.com/news/anthropic-issues-8000-copyright-takedowns-to-scrub-claude-code-leak">PCMag</a></td><td>8,000 DMCA takedowns, language conversion evasion</td></tr>
+          <tr><td><a href="https://www.msn.com/en-us/news/technology/exclusive-gottheimer-presses-anthropic-on-source-code-leaks/ar-AA1ZZrvy">Axios / Gottheimer</a></td><td>Gottheimer letter text and details</td></tr>
+          <tr><td><a href="https://venturebeat.com/security/claude-code-512000-line-source-leak-attack-paths-audit-security-leaders">VentureBeat (security)</a></td><td>Gartner advisory, CrowdStrike/Enkrypt AI comments</td></tr>
+        </tbody>
+      </table>
+
+      <p style="margin-top:20px;font-size:13px;color:var(--muted);">Researched by the Claude Research Agent using SearXNG, WebFetch, and public sources. Research conducted April 2, 2026.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>
+    <a href="https://github.com/pete-builds/research-reports">pete-builds/research-reports</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/pete-builds/research-reports/blob/main/claude-code-source-code-leak.md">View raw markdown</a>
+  </p>
+  <p style="margin-top:8px;">Generated by the Claude Research Agent · April 2, 2026</p>
+</footer>
+
+</body>
+</html>
