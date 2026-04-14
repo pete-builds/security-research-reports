@@ -12,16 +12,7 @@ summary: "IOCTL 0x22E010 is a vendor-defined buffered I/O control code used by t
 
 1. [Executive Summary](#executive-summary)
 2. [Current Status](#current-status)
-3. [IOCTL Bit Field Breakdown](#ioctl-bit-field-breakdown)
-4. [The Driver: Rentdrv2 / PoisonX](#the-driver-rentdrv2--poisonx)
-5. [Attack Pattern: BYOVD](#attack-pattern-byovd-bring-your-own-vulnerable-driver)
-6. [Reverse Engineering Methodology](#reverse-engineering-methodology)
-7. [Security Analysis](#security-analysis)
-   - [CVE-2023-44976](#cve-2023-44976)
-   - [Threat Landscape](#threat-landscape)
-   - [Detection Opportunities](#detection-opportunities)
-   - [Why the CVSS "Low" Score is Misleading](#why-the-cvss-low-score-is-misleading)
-8. [IT Operations Guide](#it-operations-guide)
+3. [IT Operations Guide](#it-operations-guide)
    - [Immediate Action Checklist](#immediate-action-checklist)
    - [SCCM/ConfigMgr Deployment Notes](#sccmconfigmgr-deployment-notes)
    - [Check Your Protection Status](#check-your-protection-status)
@@ -30,8 +21,18 @@ summary: "IOCTL 0x22E010 is a vendor-defined buffered I/O control code used by t
    - [Detection Rules](#detection-rules)
    - [Forensic Triage](#forensic-triage-has-this-already-happened)
    - [Real-World Threat Actor Usage](#real-world-threat-actor-usage)
-9. [Confidence Assessment](#confidence-assessment)
-10. [Sources](#sources)
+4. [Technical Deep Dive](#technical-deep-dive)
+   - [IOCTL Bit Field Breakdown](#ioctl-bit-field-breakdown)
+   - [The Driver: Rentdrv2 / PoisonX](#the-driver-rentdrv2--poisonx)
+   - [Attack Pattern: BYOVD](#attack-pattern-byovd-bring-your-own-vulnerable-driver)
+   - [Reverse Engineering Methodology](#reverse-engineering-methodology)
+5. [Security Analysis](#security-analysis)
+   - [CVE-2023-44976](#cve-2023-44976)
+   - [Threat Landscape](#threat-landscape)
+   - [Detection Opportunities](#detection-opportunities)
+   - [Why the CVSS "Low" Score is Misleading](#why-the-cvss-low-score-is-misleading)
+6. [Confidence Assessment](#confidence-assessment)
+7. [Sources](#sources)
 
 ---
 
@@ -65,187 +66,9 @@ At the ecosystem level, the strongest mitigation would be certificate revocation
 
 ---
 
-## IOCTL Bit Field Breakdown
-
-The Windows [`CTL_CODE`](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/defining-i-o-control-codes) macro encodes four fields into a 32-bit IOCTL value:
-
-```
-CTL_CODE(DeviceType, Function, Method, Access)
-```
-
-### Decoding 0x0022E010
-
-```
-Hex:    0x0022E010
-Binary: 0000 0000 0010 0010 1110 0000 0001 0000
-
-Bits 31-16 (Device Type):  0x0022 = 34 = FILE_DEVICE_UNKNOWN
-Bits 15-14 (Access):       0x3    = 3  = FILE_READ_ACCESS | FILE_WRITE_ACCESS
-Bits 13-2  (Function Code): 0x804 = 2052 (vendor-defined, >= 0x800)
-Bits 1-0   (Method):       0x0    = 0  = METHOD_BUFFERED
-```
-
-### Interpretation
-
-| Field | Value | Meaning |
-|-------|-------|---------|
-| Device Type | `FILE_DEVICE_UNKNOWN` (0x0022) | Generic/unspecified device type, common for third-party drivers that don't fit a standard category |
-| Required Access | `FILE_READ_ACCESS \| FILE_WRITE_ACCESS` (0x3) | Caller must have both read and write access to the device object |
-| Function Code | 0x804 (2052) | Vendor-defined function. Microsoft reserves 0x000-0x7FF for standard functions; 0x800+ is for third-party use |
-| Transfer Method | `METHOD_BUFFERED` (0x0) | Kernel copies input/output buffers via system buffer (Irp->AssociatedIrp.SystemBuffer), the safest transfer method |
-
-### Reconstruction verification
-
-```c
-CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
-= (0x0022 << 16) | (0x3 << 14) | (0x804 << 2) | 0x0
-= 0x00220000 | 0x0000C000 | 0x00002010 | 0x0
-= 0x0022E010  // Confirmed
-```
-
-**WinDbg verification command:**
-```
-!ioctldecode 0x22E010
-```
-
----
-
-## The Driver: Rentdrv2 / PoisonX
-
-### Identity
-
-IOCTL 0x22E010 belongs to the **Rentdrv2** driver, developed by Hangzhou Shunwang Technology. The driver has also been referred to as **PoisonX.sys** in PoC tooling. There are reportedly 15+ variants sharing identical code ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)).
-
-| Property | Value |
-|----------|-------|
-| Original Name | Rentdrv2.sys |
-| PoC Name | PoisonX.sys |
-| Vendor | Hangzhou Shunwang Technology |
-| Signature | Microsoft Windows Hardware Compatibility Publisher |
-| Device Path | `\\.\{F8284233-48F4-4680-ADDD-F8284233}` |
-| VT Detection | 0/71 (at time PoC author documented the sample; may have changed) |
-
-### What the driver does
-
-Rentdrv2 is a legitimate internet cafe management driver used in China. Its intended purpose is to manage user sessions and system resources in rental computer environments. However, its IOCTL dispatch handler exposes a process termination function that executes from kernel mode, bypassing user-mode access restrictions such as PPL enforcement that would block ordinary user-mode process open/terminate attempts.
-
-### The kill mechanism
-
-When IOCTL 0x22E010 is received, the driver:
-
-1. Reads the input buffer, which contains a PID as a decimal ASCII string
-2. Calls `ZwOpenProcess` to obtain a kernel handle to the target process
-3. Calls `ZwTerminateProcess` to kill the process
-
-This is significant because `ZwOpenProcess` called from kernel mode bypasses Process Protection Light (PPL) restrictions. In user mode, `OpenProcess` against a PPL-protected process returns ACCESS_DENIED, but the kernel-mode `Zw*` functions operate with full privilege ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)).
-
-### Input/Output format
-
-```
-Input:  PID as decimal ASCII string (e.g., "1234"), sent as bytes
-Output: 16-byte buffer; returns "ok" on success
-Method: METHOD_BUFFERED (via Irp->AssociatedIrp.SystemBuffer)
-```
-
----
-
-## Attack Pattern: BYOVD (Bring Your Own Vulnerable Driver)
-
-### How it works
-
-1. **Drop the driver**: Attacker places Rentdrv2.sys/PoisonX.sys on disk
-2. **Load via service**: Create a kernel service (`sc create ... type=kernel binPath=...`) and start it
-3. **Open device**: Call `CreateFileW` with device path `\\.\{F8284233-48F4-4680-ADDD-F8284233}`
-4. **Send kill IOCTL**: Call `DeviceIoControl` with control code 0x22E010, passing the target PID as input
-5. **EDR process terminated**: The driver executes termination from kernel mode, bypassing PPL restrictions that would block user-mode attempts against CrowdStrike Falcon, Defender, and similar protected processes
-
-The driver loads without triggering code-integrity checks because it carries a valid Microsoft signature ([GitHub/Nekr0w](https://github.com/Nekr0w/poisonkiller)).
-
-### Real-world usage
-
-**Agonizing Serpens (Agrius)** - an Iranian-backed APT group - weaponized Rentdrv2 in attacks against Israeli higher education and technology sector organizations starting in October 2023. The group used a custom loader called `drvIX.exe` to communicate with the driver. Palo Alto's Unit 42 documented this as an upgrade in the group's capabilities, noting they had not used BYOVD techniques in previous campaigns ([Palo Alto Unit 42](https://unit42.paloaltonetworks.com/agonizing-serpens-targets-israeli-tech-higher-ed-sectors/)).
-
----
-
-## Reverse Engineering Methodology
-
-### Tools for IOCTL analysis
-
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| **IDA Pro** | Static analysis/decompilation of the .sys driver | Primary tool used in the original RE analysis |
-| **Ghidra** | Free alternative to IDA for driver decompilation | NSA's reverse engineering framework |
-| **WinDbg** | Kernel debugging, [`!ioctldecode`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-ioctldecode) command | Built-in IOCTL decoder: `!ioctldecode 0x22E010` |
-| **WinObj** (Sysinternals) | Discover device symbolic links at runtime | Used to find `\\.\{F8284233-48F4-4680-ADDD-F8284233}` |
-| **OSR IOCTL Decoder** | Online tool to decode CTL_CODE fields | Quick bit field breakdown |
-| **OSR Driver Loader** | Load/unload kernel drivers for testing | Used instead of `sc create` for lab environments |
-| **[IoctlHunter](https://z4ksec.github.io/posts/ioctlhunter-release-v0.2/)** | Dynamic IOCTL monitoring via DLL injection | Captures IOCTLs in a controlled lab environment |
-| **VirusTotal** | Check driver signature and detection rate | Confirmed valid Microsoft signature |
-
-### RE approach for this driver
-
-The original reverse engineer (Jehad Abudagga) documented the following approach ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)):
-
-1. **Skip the DriverEntry**: The `DriverEntry` function was heavily obfuscated/mangled. Instead of fighting the obfuscation, the analyst went directly to the **IRP dispatch handler** (the function registered for `IRP_MJ_DEVICE_CONTROL`)
-2. **Fix types and names**: IDA's initial decompilation output was difficult to read. Manual type annotation and variable renaming were required to produce clean pseudocode
-3. **Identify the IOCTL dispatch table**: The dispatch handler compared incoming IOCTL codes and routed to different functions. Two IOCTLs were found; 0x22E010 was the one leading to the process kill function
-4. **Trace the kill chain**: Following the 0x22E010 handler revealed the `ZwOpenProcess` to `ZwTerminateProcess` call sequence
-
-### General IOCTL RE methodology
-
-For reverse engineering any unknown IOCTL:
-
-1. **Decode the bits**: Use `CTL_CODE` macro decomposition (as shown above) to understand device type, access requirements, function code, and transfer method
-2. **Identify the driver**: Search for the IOCTL value in known databases (ioctls.net, the DDK headers, public malware/PoC repos)
-3. **Load in disassembler**: Open the .sys file in IDA/Ghidra, locate `DriverEntry`, find the `IRP_MJ_DEVICE_CONTROL` dispatch function
-4. **Find the switch/comparison**: The dispatch handler will compare `IoStackLocation->Parameters.DeviceIoControl.IoControlCode` against known values
-5. **Trace the handler**: Follow the code path for your target IOCTL to understand what it does
-6. **Dynamic analysis**: Use WinDbg kernel debugging to set breakpoints on `NtDeviceIoControlFile` and observe live IOCTL traffic
-
----
-
-## Security Analysis
-
-### CVE-2023-44976
-
-| Field | Value |
-|-------|-------|
-| CVE ID | [CVE-2023-44976](https://nvd.nist.gov/vuln/detail/CVE-2023-44976) |
-| CWE | CWE-782: Exposed IOCTL with Insufficient Access Control |
-| CVSS 3.1 | 3.2 (Low) per MITRE-provided vector |
-| Vector | AV:L/AC:L/PR:H/UI:N/S:C/C:N/I:N/A:L |
-| Affected | Hangzhou Shunwang Rentdrv2 before 2024-12-24 |
-| Exploited in Wild | October 2023 |
-| NVD Published | August 1, 2025 |
-| Fix | Update to Rentdrv2 versions released 2024-12-24 or later |
-
-Source: [NVD CVE-2023-44976](https://nvd.nist.gov/vuln/detail/CVE-2023-44976), [Feedly CVE feed](https://feedly.com/cve/CVE-2023-44976)
-
-**Note on CVSS score**: The 3.2 Low rating (from the MITRE-provided vector in the CVE record; NVD's own assessment fields currently show N/A) is arguably understated. While the attack vector is local and requires high privileges (admin to load a driver), the scope is changed (S:C) because it affects processes outside the vulnerable component's security context. The real-world impact of killing EDR processes to enable further attacks is substantially higher than the base score suggests.
-
-### Threat landscape
-
-- The vulnerability sat in **reserved CVE status for over a year** before publication (wild exploitation October 2023, NVD published August 2025) ([Feedly](https://feedly.com/cve/CVE-2023-44976))
-- Multiple public PoC repositories exist on GitHub, lowering the barrier for copycat attacks
-- The BYOVD technique using this driver is potentially effective against EDR products whose protection model depends heavily on keeping critical services protected from user-mode termination, not just CrowdStrike. Individual products may layer additional self-defense logic, kernel callbacks, or recovery mechanisms. ([GitHub/Muz1K1zuM](https://github.com/Muz1K1zuM/PoisonKiller_bof))
-
-### Detection opportunities
-
-1. **Driver load monitoring**: Alert on PoisonX.sys, Rentdrv2.sys, or service creation for unfamiliar kernel drivers
-2. **Device path monitoring**: Watch for `CreateFile` calls targeting `\\.\{F8284233-48F4-4680-ADDD-F8284233}`
-3. **IOCTL monitoring**: Detect `DeviceIoControl` calls with code 0x22E010
-4. **Driver hash blocklisting**: Add known Rentdrv2/PoisonX driver hashes to WDAC or HVCI blocklists
-5. **EDR telemetry loss**: Prioritize agent heartbeat-loss detection. If an EDR agent goes silent unexpectedly, treat that as a high-priority indicator rather than trying to infer kernel-initiated termination directly
-
-### Why the CVSS "Low" score is misleading
-
-The base score rates this as low-severity because the attack vector is local and requires admin privileges. In practice, this drastically understates the risk. Attackers who already have admin access use this driver as a force multiplier: they kill EDR first, then deploy ransomware, exfiltrate data, or persist undetected. The CVSS score measures the driver in isolation. The real-world impact is the chain: EDR dies, then the actual attack begins with no visibility. DragonForce ransomware uses Rentdrv2.sys as one of its two BYOVD backends (config field `use_sys=2`), confirming this is an active component in ransomware kill chains, not a theoretical risk ([S2W Medium](https://medium.com/s2wblog/detailed-analysis-of-dragonforce-ransomware-25d1a91a4509), [Acronis TRU](https://www.acronis.com/en/tru/posts/the-dragonforce-cartel-scattered-spider-at-the-gate/)).
-
----
-
 ## IT Operations Guide
 
-This section is written for IT staff who need to assess exposure, detect this attack, and harden their environment.
+This section is for IT staff who need to assess exposure, detect this attack, and harden their environment. The [Technical Deep Dive](#technical-deep-dive) follows for those who want to understand the underlying mechanics.
 
 ### Immediate action checklist
 
@@ -382,6 +205,182 @@ This is not theoretical. Active ransomware groups use this driver in production 
 
 - **Agonizing Serpens (Agrius)**: Iranian APT, used Rentdrv2 via custom loader `drvIX.exe` against Israeli higher education and tech sector targets since October 2023 ([Palo Alto Unit 42](https://unit42.paloaltonetworks.com/agonizing-serpens-targets-israeli-tech-higher-ed-sectors/))
 - **DragonForce ransomware**: Uses Rentdrv2.sys (BadRentdrv2) as one of two BYOVD backends. Config field `use_sys=2` selects rentdrv2.sys. [Source: S2W Medium](https://medium.com/s2wblog/detailed-analysis-of-dragonforce-ransomware-25d1a91a4509), [Acronis TRU](https://www.acronis.com/en/tru/posts/the-dragonforce-cartel-scattered-spider-at-the-gate/)
+
+---
+
+## Technical Deep Dive
+
+The following sections explain how the driver works, how the IOCTL is structured, and how the original reverse engineering was performed. This context supports the operational guidance above but is not required to act on it.
+
+### IOCTL Bit Field Breakdown
+
+The Windows [`CTL_CODE`](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/defining-i-o-control-codes) macro encodes four fields into a 32-bit IOCTL value:
+
+```
+CTL_CODE(DeviceType, Function, Method, Access)
+```
+
+#### Decoding 0x0022E010
+
+```
+Hex:    0x0022E010
+Binary: 0000 0000 0010 0010 1110 0000 0001 0000
+
+Bits 31-16 (Device Type):  0x0022 = 34 = FILE_DEVICE_UNKNOWN
+Bits 15-14 (Access):       0x3    = 3  = FILE_READ_ACCESS | FILE_WRITE_ACCESS
+Bits 13-2  (Function Code): 0x804 = 2052 (vendor-defined, >= 0x800)
+Bits 1-0   (Method):       0x0    = 0  = METHOD_BUFFERED
+```
+
+#### Interpretation
+
+| Field | Value | Meaning |
+|-------|-------|---------|
+| Device Type | `FILE_DEVICE_UNKNOWN` (0x0022) | Generic/unspecified device type, common for third-party drivers that don't fit a standard category |
+| Required Access | `FILE_READ_ACCESS \| FILE_WRITE_ACCESS` (0x3) | Caller must have both read and write access to the device object |
+| Function Code | 0x804 (2052) | Vendor-defined function. Microsoft reserves 0x000-0x7FF for standard functions; 0x800+ is for third-party use |
+| Transfer Method | `METHOD_BUFFERED` (0x0) | Kernel copies input/output buffers via system buffer (Irp->AssociatedIrp.SystemBuffer), the safest transfer method |
+
+#### Reconstruction verification
+
+```c
+CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+= (0x0022 << 16) | (0x3 << 14) | (0x804 << 2) | 0x0
+= 0x00220000 | 0x0000C000 | 0x00002010 | 0x0
+= 0x0022E010  // Confirmed
+```
+
+**WinDbg verification command:**
+```
+!ioctldecode 0x22E010
+```
+
+### The Driver: Rentdrv2 / PoisonX
+
+#### Identity
+
+IOCTL 0x22E010 belongs to the **Rentdrv2** driver, developed by Hangzhou Shunwang Technology. The driver has also been referred to as **PoisonX.sys** in PoC tooling. There are reportedly 15+ variants sharing identical code ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)).
+
+| Property | Value |
+|----------|-------|
+| Original Name | Rentdrv2.sys |
+| PoC Name | PoisonX.sys |
+| Vendor | Hangzhou Shunwang Technology |
+| Signature | Microsoft Windows Hardware Compatibility Publisher |
+| Device Path | `\\.\{F8284233-48F4-4680-ADDD-F8284233}` |
+| VT Detection | 0/71 (at time PoC author documented the sample; may have changed) |
+
+#### What the driver does
+
+Rentdrv2 is a legitimate internet cafe management driver used in China. Its intended purpose is to manage user sessions and system resources in rental computer environments. However, its IOCTL dispatch handler exposes a process termination function that executes from kernel mode, bypassing user-mode access restrictions such as PPL enforcement that would block ordinary user-mode process open/terminate attempts.
+
+#### The kill mechanism
+
+When IOCTL 0x22E010 is received, the driver:
+
+1. Reads the input buffer, which contains a PID as a decimal ASCII string
+2. Calls `ZwOpenProcess` to obtain a kernel handle to the target process
+3. Calls `ZwTerminateProcess` to kill the process
+
+This is significant because `ZwOpenProcess` called from kernel mode bypasses Process Protection Light (PPL) restrictions. In user mode, `OpenProcess` against a PPL-protected process returns ACCESS_DENIED, but the kernel-mode `Zw*` functions operate with full privilege ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)).
+
+#### Input/Output format
+
+```
+Input:  PID as decimal ASCII string (e.g., "1234"), sent as bytes
+Output: 16-byte buffer; returns "ok" on success
+Method: METHOD_BUFFERED (via Irp->AssociatedIrp.SystemBuffer)
+```
+
+### Attack Pattern: BYOVD (Bring Your Own Vulnerable Driver)
+
+#### How it works
+
+1. **Drop the driver**: Attacker places Rentdrv2.sys/PoisonX.sys on disk
+2. **Load via service**: Create a kernel service (`sc create ... type=kernel binPath=...`) and start it
+3. **Open device**: Call `CreateFileW` with device path `\\.\{F8284233-48F4-4680-ADDD-F8284233}`
+4. **Send kill IOCTL**: Call `DeviceIoControl` with control code 0x22E010, passing the target PID as input
+5. **EDR process terminated**: The driver executes termination from kernel mode, bypassing PPL restrictions that would block user-mode attempts against CrowdStrike Falcon, Defender, and similar protected processes
+
+The driver loads without triggering code-integrity checks because it carries a valid Microsoft signature ([GitHub/Nekr0w](https://github.com/Nekr0w/poisonkiller)).
+
+#### Real-world usage
+
+**Agonizing Serpens (Agrius)** weaponized Rentdrv2 in attacks against Israeli higher education and technology sector organizations starting in October 2023. The group used a custom loader called `drvIX.exe` to communicate with the driver. Palo Alto's Unit 42 documented this as an upgrade in the group's capabilities, noting they had not used BYOVD techniques in previous campaigns ([Palo Alto Unit 42](https://unit42.paloaltonetworks.com/agonizing-serpens-targets-israeli-tech-higher-ed-sectors/)).
+
+### Reverse Engineering Methodology
+
+#### Tools for IOCTL analysis
+
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| **IDA Pro** | Static analysis/decompilation of the .sys driver | Primary tool used in the original RE analysis |
+| **Ghidra** | Free alternative to IDA for driver decompilation | NSA's reverse engineering framework |
+| **WinDbg** | Kernel debugging, [`!ioctldecode`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-ioctldecode) command | Built-in IOCTL decoder: `!ioctldecode 0x22E010` |
+| **WinObj** (Sysinternals) | Discover device symbolic links at runtime | Used to find `\\.\{F8284233-48F4-4680-ADDD-F8284233}` |
+| **OSR IOCTL Decoder** | Online tool to decode CTL_CODE fields | Quick bit field breakdown |
+| **OSR Driver Loader** | Load/unload kernel drivers for testing | Used instead of `sc create` for lab environments |
+| **[IoctlHunter](https://z4ksec.github.io/posts/ioctlhunter-release-v0.2/)** | Dynamic IOCTL monitoring via DLL injection | Captures IOCTLs in a controlled lab environment |
+| **VirusTotal** | Check driver signature and detection rate | Confirmed valid Microsoft signature |
+
+#### RE approach for this driver
+
+The original reverse engineer (Jehad Abudagga) documented the following approach ([Medium/@jehadbudagga](https://medium.com/@jehadbudagga/reverse-engineering-a-0day-used-against-crowdstrike-edr-a5ea1fbe3fd4)):
+
+1. **Skip the DriverEntry**: The `DriverEntry` function was heavily obfuscated/mangled. Instead of fighting the obfuscation, the analyst went directly to the **IRP dispatch handler** (the function registered for `IRP_MJ_DEVICE_CONTROL`)
+2. **Fix types and names**: IDA's initial decompilation output was difficult to read. Manual type annotation and variable renaming were required to produce clean pseudocode
+3. **Identify the IOCTL dispatch table**: The dispatch handler compared incoming IOCTL codes and routed to different functions. Two IOCTLs were found; 0x22E010 was the one leading to the process kill function
+4. **Trace the kill chain**: Following the 0x22E010 handler revealed the `ZwOpenProcess` to `ZwTerminateProcess` call sequence
+
+#### General IOCTL RE methodology
+
+For reverse engineering any unknown IOCTL:
+
+1. **Decode the bits**: Use `CTL_CODE` macro decomposition (as shown above) to understand device type, access requirements, function code, and transfer method
+2. **Identify the driver**: Search for the IOCTL value in known databases (ioctls.net, the DDK headers, public malware/PoC repos)
+3. **Load in disassembler**: Open the .sys file in IDA/Ghidra, locate `DriverEntry`, find the `IRP_MJ_DEVICE_CONTROL` dispatch function
+4. **Find the switch/comparison**: The dispatch handler will compare `IoStackLocation->Parameters.DeviceIoControl.IoControlCode` against known values
+5. **Trace the handler**: Follow the code path for your target IOCTL to understand what it does
+6. **Dynamic analysis**: Use WinDbg kernel debugging to set breakpoints on `NtDeviceIoControlFile` and observe live IOCTL traffic
+
+---
+
+## Security Analysis
+
+### CVE-2023-44976
+
+| Field | Value |
+|-------|-------|
+| CVE ID | [CVE-2023-44976](https://nvd.nist.gov/vuln/detail/CVE-2023-44976) |
+| CWE | CWE-782: Exposed IOCTL with Insufficient Access Control |
+| CVSS 3.1 | 3.2 (Low) per MITRE-provided vector |
+| Vector | AV:L/AC:L/PR:H/UI:N/S:C/C:N/I:N/A:L |
+| Affected | Hangzhou Shunwang Rentdrv2 before 2024-12-24 |
+| Exploited in Wild | October 2023 |
+| NVD Published | August 1, 2025 |
+| Fix | Update to Rentdrv2 versions released 2024-12-24 or later |
+
+Source: [NVD CVE-2023-44976](https://nvd.nist.gov/vuln/detail/CVE-2023-44976), [Feedly CVE feed](https://feedly.com/cve/CVE-2023-44976)
+
+**Note on CVSS score**: The 3.2 Low rating (from the MITRE-provided vector in the CVE record; NVD's own assessment fields currently show N/A) is arguably understated. While the attack vector is local and requires high privileges (admin to load a driver), the scope is changed (S:C) because it affects processes outside the vulnerable component's security context. The real-world impact of killing EDR processes to enable further attacks is substantially higher than the base score suggests.
+
+### Threat landscape
+
+- The vulnerability sat in **reserved CVE status for over a year** before publication (wild exploitation October 2023, NVD published August 2025) ([Feedly](https://feedly.com/cve/CVE-2023-44976))
+- Multiple public PoC repositories exist on GitHub, lowering the barrier for copycat attacks
+- The BYOVD technique using this driver is potentially effective against EDR products whose protection model depends heavily on keeping critical services protected from user-mode termination, not just CrowdStrike. Individual products may layer additional self-defense logic, kernel callbacks, or recovery mechanisms. ([GitHub/Muz1K1zuM](https://github.com/Muz1K1zuM/PoisonKiller_bof))
+
+### Detection opportunities
+
+1. **Driver load monitoring**: Alert on PoisonX.sys, Rentdrv2.sys, or service creation for unfamiliar kernel drivers
+2. **Device path monitoring**: Watch for `CreateFile` calls targeting `\\.\{F8284233-48F4-4680-ADDD-F8284233}`
+3. **IOCTL monitoring**: Detect `DeviceIoControl` calls with code 0x22E010
+4. **Driver hash blocklisting**: Add known Rentdrv2/PoisonX driver hashes to WDAC or HVCI blocklists
+5. **EDR telemetry loss**: Prioritize agent heartbeat-loss detection. If an EDR agent goes silent unexpectedly, treat that as a high-priority indicator rather than trying to infer kernel-initiated termination directly
+
+### Why the CVSS "Low" score is misleading
+
+The base score rates this as low-severity because the attack vector is local and requires admin privileges. In practice, this drastically understates the risk. Attackers who already have admin access use this driver as a force multiplier: they kill EDR first, then deploy ransomware, exfiltrate data, or persist undetected. The CVSS score measures the driver in isolation. The real-world impact is the chain: EDR dies, then the actual attack begins with no visibility. DragonForce ransomware uses Rentdrv2.sys as one of its two BYOVD backends (config field `use_sys=2`), confirming this is an active component in ransomware kill chains, not a theoretical risk ([S2W Medium](https://medium.com/s2wblog/detailed-analysis-of-dragonforce-ransomware-25d1a91a4509), [Acronis TRU](https://www.acronis.com/en/tru/posts/the-dragonforce-cartel-scattered-spider-at-the-gate/)).
 
 ---
 
