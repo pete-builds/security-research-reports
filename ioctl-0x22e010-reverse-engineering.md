@@ -23,6 +23,7 @@ summary: "IOCTL 0x22E010 is a vendor-defined buffered I/O control code used by t
    - [Why the CVSS "Low" Score is Misleading](#why-the-cvss-low-score-is-misleading)
 8. [IT Operations Guide](#it-operations-guide)
    - [Immediate Action Checklist](#immediate-action-checklist)
+   - [SCCM/ConfigMgr Deployment Notes](#sccmconfigmgr-deployment-notes)
    - [Check Your Protection Status](#check-your-protection-status)
    - [Known Driver Hashes for Blocklisting](#known-driver-hashes-for-blocklisting)
    - [Event Log Detection](#event-log-detection)
@@ -254,6 +255,18 @@ This section is written for IT staff who need to assess exposure, detect this at
 4. **Deploy Sysmon** if not already running, with driver load logging (Event ID 6)
 5. **Search historical logs** for indicators of past compromise (see Forensic Triage below)
 6. **Add driver hashes** to your blocklist if using a custom WDAC policy
+
+### SCCM/ConfigMgr deployment notes
+
+If your organization manages endpoints with Microsoft Configuration Manager (SCCM/MECM), note the following:
+
+- **ASR rule:** The "Block abuse of exploited vulnerable signed drivers" rule does not have a ConfigMgr policy name yet (listed as "Not yet available" on Microsoft Learn). Deploy it via a PowerShell script pushed through a configuration baseline or package:
+  ```powershell
+  Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled
+  ```
+- **HVCI and driver blocklist:** Deploy via configuration baselines, task sequences, or Group Policy. There is no native ConfigMgr toggle for these settings.
+- **Sysmon:** Deploy as a ConfigMgr application or package. The [LOLDrivers Sysmon config](https://www.loldrivers.io/) (`detections/sysmon/sysmon_config_vulnerable_hashes_block.xml`) can be bundled with the installer to enable driver-level detection out of the box.
+- **Caution with other ASR rules:** The separate ASR rule "Block process creations originating from PSExec and WMI commands" (GUID: `d1e49aac-8f56-4280-b9ba-993a6d77406c`) is **incompatible with ConfigMgr** because it blocks WMI commands the ConfigMgr client depends on. That rule is not recommended in this report, but be aware of it if evaluating the broader ASR rule set. ([Microsoft Learn](https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference))
 
 ### Check your protection status
 
