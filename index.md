@@ -3,7 +3,7 @@ layout: default
 title: Security Research Reports
 ---
 
-# Security Research Reports
+# What Do I Need to Know Now?
 
 | Report | Date |
 |--------|------|
