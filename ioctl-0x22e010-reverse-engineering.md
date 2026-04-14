@@ -258,15 +258,13 @@ This section is written for IT staff who need to assess exposure, detect this at
 
 ### SCCM/ConfigMgr deployment notes
 
-If your organization manages endpoints with Microsoft Configuration Manager (SCCM/MECM), note the following:
-
-- **ASR rule:** The "Block abuse of exploited vulnerable signed drivers" rule does not have a ConfigMgr policy name yet (listed as "Not yet available" on Microsoft Learn). Deploy it via a PowerShell script pushed through a configuration baseline or package:
+- **ASR rule:** This rule has no ConfigMgr policy name yet ("Not yet available" on Microsoft Learn). Push it as a PowerShell script via configuration baseline or package:
   ```powershell
   Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled
   ```
-- **HVCI and driver blocklist:** Deploy via configuration baselines, task sequences, or Group Policy. There is no native ConfigMgr toggle for these settings.
-- **Sysmon:** Deploy as a ConfigMgr application or package. The [LOLDrivers Sysmon config](https://www.loldrivers.io/) (`detections/sysmon/sysmon_config_vulnerable_hashes_block.xml`) can be bundled with the installer to enable driver-level detection out of the box.
-- **Caution with other ASR rules:** The separate ASR rule "Block process creations originating from PSExec and WMI commands" (GUID: `d1e49aac-8f56-4280-b9ba-993a6d77406c`) is **incompatible with ConfigMgr** because it blocks WMI commands the ConfigMgr client depends on. That rule is not recommended in this report, but be aware of it if evaluating the broader ASR rule set. ([Microsoft Learn](https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference))
+- **HVCI and driver blocklist:** No native ConfigMgr toggle. Use configuration baselines, task sequences, or GPO.
+- **Sysmon:** Deploy as a ConfigMgr application. Bundle the [LOLDrivers Sysmon config](https://www.loldrivers.io/) (`detections/sysmon/sysmon_config_vulnerable_hashes_block.xml`) with the installer so Event ID 6 driver load logging is active immediately.
+- **PSExec/WMI ASR rule warning:** The separate rule "Block process creations originating from PSExec and WMI commands" (GUID: `d1e49aac-8f56-4280-b9ba-993a6d77406c`) **breaks the ConfigMgr client** because it blocks WMI commands ConfigMgr depends on. Not recommended in this report, but worth knowing if you're evaluating the full ASR rule set. ([Microsoft Learn](https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference))
 
 ### Check your protection status
 
