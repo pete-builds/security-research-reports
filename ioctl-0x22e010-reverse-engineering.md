@@ -450,7 +450,7 @@ This report was researched and written using Claude Code (Anthropic) as an accel
 - **CVE details** (CVE-2023-44976) were cross-checked against the NVD API: CWE-782, CVSS 3.1 base score 3.2 (Low), and description all confirmed matching.
 - **All SHA256 hashes** (Rentdrv2 and 10 PoisonX variants) were verified against LOLDrivers catalog pages. Authentihash and signer metadata confirmed.
 - **The Defender ASR rule GUID** (`56a863a9-875e-4185-98a7-b882c64b5ce5`) was confirmed against the Microsoft Learn ASR rules reference, including its documented behavior (blocks writing to disk, does not block loading).
-- **PowerShell detection commands** were tested on a Windows machine. The Event ID 7045 (service creation) query executed successfully and returned real results. The Sysmon Event ID 6 query is syntactically valid but requires Sysmon to be deployed, which was not present on the test machine.
+- **PowerShell detection commands** were tested on a Windows machine with Sysmon deployed. The Event ID 7045 (service creation) query executed successfully and returned real results. The Sysmon Event ID 6 (driver load) query and the filtered variant (`rentdrv2|PoisonX|F8284233`) both executed successfully against a live Sysmon log.
 - **All 15+ source URLs** were checked and confirmed live, including LOLDrivers, NVD, Unit 42, the original Medium reverse engineering blog, PoisonKiller GitHub PoC, CrowdStrike's blog (confirming the `C:\AU_Data\1721289943.sys` drop path), Microsoft Learn, Splunk detection rules, and the S2W DragonForce analysis (confirming `use_sys=2`).
 - **Sigma and Splunk detection rule IDs** were verified against their respective sources.
 
