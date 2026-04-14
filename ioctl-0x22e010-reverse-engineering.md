@@ -20,7 +20,7 @@ summary: "IOCTL 0x22E010 is a vendor-defined buffered I/O control code used by t
    - [CVE-2023-44976](#cve-2023-44976)
    - [Threat Landscape](#threat-landscape)
    - [Detection Opportunities](#detection-opportunities)
-   - [Why the CVSS 3.2 "Low" Score is Misleading](#why-the-cvss-32-low-score-is-misleading)
+   - [Why the CVSS "Low" Score is Misleading](#why-the-cvss-low-score-is-misleading)
 8. [IT Operations Guide](#it-operations-guide)
    - [Immediate Action Checklist](#immediate-action-checklist)
    - [Check Your Protection Status](#check-your-protection-status)
@@ -52,7 +52,7 @@ At the ecosystem level, the strongest mitigation would be certificate revocation
 
 **Confirmed facts:**
 - **IOCTL 0x22E010** is a process-termination control code exposed by the Rentdrv2/PoisonX Windows kernel driver
-- Assigned **CVE-2023-44976** (CWE-782: Exposed IOCTL with Insufficient Access Control), CVSS 3.2 Low per MITRE-provided vector
+- Assigned **CVE-2023-44976** (CWE-782: Exposed IOCTL with Insufficient Access Control), CVSS 3.1 base score 3.2 (Low) per MITRE-provided vector
 - Exploited in the wild since **October 2023** by the Iranian-backed APT group Agonizing Serpens (Agrius) in attacks against Israeli higher education and tech sectors ([Palo Alto Unit 42](https://unit42.paloaltonetworks.com/agonizing-serpens-targets-israeli-tech-higher-ed-sectors/))
 - Known vulnerable Rentdrv2/PoisonX variants have been observed with valid Microsoft signatures. Signature metadata varies by sample.
 - Vendor patch available: Rentdrv2 versions after 2024-12-24 address the vulnerability ([NVD](https://nvd.nist.gov/vuln/detail/CVE-2023-44976))
@@ -236,7 +236,7 @@ Source: [NVD CVE-2023-44976](https://nvd.nist.gov/vuln/detail/CVE-2023-44976), [
 4. **Driver hash blocklisting**: Add known Rentdrv2/PoisonX driver hashes to WDAC or HVCI blocklists
 5. **EDR telemetry loss**: Prioritize agent heartbeat-loss detection. If an EDR agent goes silent unexpectedly, treat that as a high-priority indicator rather than trying to infer kernel-initiated termination directly
 
-### Why the CVSS 3.2 "Low" score is misleading
+### Why the CVSS "Low" score is misleading
 
 The base score rates this as low-severity because the attack vector is local and requires admin privileges. In practice, this drastically understates the risk. Attackers who already have admin access use this driver as a force multiplier: they kill EDR first, then deploy ransomware, exfiltrate data, or persist undetected. The CVSS score measures the driver in isolation. The real-world impact is the chain: EDR dies, then the actual attack begins with no visibility. DragonForce ransomware uses Rentdrv2.sys as one of its two BYOVD backends (config field `use_sys=2`), confirming this is an active component in ransomware kill chains, not a theoretical risk ([S2W Medium](https://medium.com/s2wblog/detailed-analysis-of-dragonforce-ransomware-25d1a91a4509), [Acronis TRU](https://www.acronis.com/en/tru/posts/the-dragonforce-cartel-scattered-spider-at-the-gate/)).
 
@@ -445,6 +445,15 @@ This is not theoretical. Active ransomware groups use this driver in production 
 
 ## How This Report Was Made
 
-This report was generated using Claude Code (Anthropic) as a research and drafting tool. The author directed the research scope, reviewed all claims for accuracy, and applied editorial judgment throughout. All factual claims are grounded in cited sources that were fetched and verified during the research process.
+This report was researched and written using Claude Code (Anthropic) as an accelerator. The author defined the research scope, selected sources, and applied editorial judgment throughout. Before publication, the following verification steps were performed:
 
-**Disclaimer:** This report is provided for informational and defensive security purposes only. While every effort has been made to ensure accuracy, security research involves rapidly evolving information. Claims are tagged with confidence levels where appropriate. Readers should independently verify critical findings before making security decisions. The author is not responsible for actions taken based on this report. Detection rates, blocklist status, and threat actor activity are time-sensitive and may have changed since publication.
+- **CVE details** (CVE-2023-44976) were cross-checked against the NVD API: CWE-782, CVSS 3.1 base score 3.2 (Low), and description all confirmed matching.
+- **All SHA256 hashes** (Rentdrv2 and 10 PoisonX variants) were verified against LOLDrivers catalog pages. Authentihash and signer metadata confirmed.
+- **The Defender ASR rule GUID** (`56a863a9-875e-4185-98a7-b882c64b5ce5`) was confirmed against the Microsoft Learn ASR rules reference, including its documented behavior (blocks writing to disk, does not block loading).
+- **PowerShell detection commands** were tested on a Windows machine. The Event ID 7045 (service creation) query executed successfully and returned real results. The Sysmon Event ID 6 query is syntactically valid but requires Sysmon to be deployed, which was not present on the test machine.
+- **All 15+ source URLs** were checked and confirmed live, including LOLDrivers, NVD, Unit 42, the original Medium reverse engineering blog, PoisonKiller GitHub PoC, CrowdStrike's blog (confirming the `C:\AU_Data\1721289943.sys` drop path), Microsoft Learn, Splunk detection rules, and the S2W DragonForce analysis (confirming `use_sys=2`).
+- **Sigma and Splunk detection rule IDs** were verified against their respective sources.
+
+Every factual claim links to a primary source readers can verify independently.
+
+**Disclaimer:** This report is provided for informational and defensive security purposes only. Security research involves rapidly evolving information. Detection rates, blocklist status, and threat actor activity are time-sensitive and may have changed since publication. Readers should independently verify critical findings before making security decisions.
