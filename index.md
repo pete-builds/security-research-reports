@@ -8,8 +8,6 @@ title: Security Research Reports
 | Report | Date |
 |--------|------|
 | [Signed Driver Used to Kill CrowdStrike EDR](ioctl-0x22e010-reverse-engineering) | 2026-04-14 |
-| [Repo Health Agents: Landscape Analysis](repo-health-agents-landscape) | 2026-04-11 |
-| [Repo Health Competitive Analysis](repo-health-competitive-analysis) | 2026-04-10 |
 | [Axios Package Compromise](axios-package-compromised) | 2026-04-09 |
 | [Claude Code Enterprise Security Features](claude-code-enterprise-security-features) | 2026-04-06 |
 | [CVE-2026-33579: OpenClaw Privilege Escalation](cve-2026-33579-openclaw-privilege-escalation) | 2026-04-05 |
